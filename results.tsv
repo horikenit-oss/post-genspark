@@ -8,3 +8,4 @@ loop_id	date	skill	topic	skill_score	genspark_score	gap_score	status	key_change	
 7	2026-03-30	product-comparison	ゲーミングチェア 腰痛持ち 予算5万円以内	70	87	17	KEEP	失敗パターン警告・体格フィット数値・サブタイプ分岐	v1.0.3
 8	2026-03-30	service-selection	クラウドストレージ 個人+仕事兼用 月2000円以内	73	88	15	KEEP	公式価格直接フェッチ・迷い解消ツリー・弱点明示	v1.0.3
 9	2026-03-30	travel-planning	北海道スキー旅行 3泊4日 カップル 予算25万円	70	89	19	KEEP	レンタル有無分岐・ツアー価格数値比較・節約代替案	v1.0.3
+10	2026-03-30	product-comparison	全自動コーヒーメーカー 豆から 予算3万円以内 一人暮らし	68	94	26	BASELINE	v2.0.0初回実行（思考パターン汎用化後の新ベースライン）	9f19cb8
