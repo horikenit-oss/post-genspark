@@ -1,90 +1,149 @@
 # post-genspark 自律改善ループ
-## autoresearchインスパイア版 — エージェント実行指示書
+## autoresearch完全準拠版 — エージェント実行指示書
 
 ---
 
 ## このファイルの役割
 
-autoresearchの`program.md`に相当する。
-AIエージェントはこのファイルの指示に従って、人間の介入なしに自律的にループを回す。
+karpathy/autoresearch の `program.md` に完全準拠した自律ループ指示書。
+AIエージェントはこのファイルの指示に従い、**人間の介入なしに無限ループを回す（NEVER STOP）**。
 
-**変更対象 (train.py相当):** `skills/*/SKILL.md`
-**固定評価器 (prepare.py相当):** `evaluate_rubric.md` — 変更禁止
-**実験ログ:** `results.tsv`
-**最適化指標:** `gap_score = genspark_score - skill_score`（低いほど良い）
-**改善判定:** `gap_score が前回より下がったら KEEP、変わらないか上がったら DISCARD`
+### autoresearchとの対応関係
+
+| autoresearch | post-genspark |
+|---|---|
+| `train.py` — 実験対象 | `skills/*/SKILL.md` — 実験対象 |
+| `prepare.py` — 固定評価器 | `evaluate_rubric.md` — 変更禁止 |
+| `program.md` — エージェント指示書 | このファイル |
+| `results.tsv` — **gitで管理しない**浮動ファイル | `results.tsv` — **gitで管理しない** |
+| `val_bpb` — 最適化指標（低いほど良い） | `gap_score = genspark_score - skill_score`（低いほど良い） |
+| git commit → KEEP / git reset → DISCARD | 同じ |
 
 ---
 
-## ループの全体フロー
+## セットアップ（セッション開始時に1回だけ）
+
+```bash
+# 1. ブランチ確認
+git branch  # autoresearch/mar30 等の実験ブランチにいることを確認
+
+# 2. ファイル確認
+# 読むもの: program.md（このファイル）, evaluate_rubric.md, skills/*/SKILL.md
+# 絶対に変更しないもの: evaluate_rubric.md
+# 実験で変更するもの: skills/*/SKILL.md
+
+# 3. results.tsv の初期化（存在しなければ作成）
+# results.tsv は .gitignore に入っており、git管理されない
+# ヘッダー行のみで始める:
+echo "commit\tgap_score\tskill_score\tgenspark_score\tstatus\tskill\ttopic\tdescription" > results.tsv
+
+# 4. 確認したらループ開始
+```
+
+---
+
+## ループの全体フロー（autoresearch準拠）
 
 ```
 [ループ開始]
   ↓
-Step 1: 次のトピックを選択（topics.json から未使用のもの）
+Step 1: git 状態の確認
   ↓
-Step 2: 選んだスキルで出力を生成（WebSearch + WebFetch で情報収集）
+Step 2: 仮説を立て、SKILL.md を修正する
   ↓
-Step 3: 同じクエリを GenSpark に送信してアウトプット取得
+Step 3: git commit（実行前にコミット — autoresearch と同じ）
   ↓
-Step 4: evaluate_rubric.md の5次元で両方を採点 → skill_score / genspark_score / gap_score
+Step 4: スキルを実行してアウトプットを生成
   ↓
-Step 5: 差分分析 — GenSpark が勝っている点を特定して「仮説」を立てる
+Step 5: 同じクエリを GenSpark に送信してアウトプット取得
   ↓
-Step 6: SKILL.md を仮説に基づいて更新
+Step 6: evaluate_rubric.md の5次元で両方を採点
   ↓
-Step 7: git commit (KEEP候補) または 何も変えない (DISCARD候補)
+Step 7: gap_score を前回と比較 → KEEP or DISCARD
   ↓
-Step 8: results.tsv に記録
+Step 8: results.tsv に記録（git commit しない）
   ↓
-Step 9: ループ先頭に戻る
+Step 1 に戻る（NEVER STOP）
 ```
 
 ---
 
-## Step 1: トピック選択ルール
+## Step 1: git 状態の確認
 
-```python
-# 疑似コード
-used_topics = [row["topic"] for row in results.tsv]
-available = [t for t in topics.json if t["id"] not in used_topics]
-# 3スキルをラウンドロビンで回す
-next_skill = round_robin(["product-comparison", "service-selection", "travel-planning"])
-next_topic = random.choice([t for t in available if t["skill"] == next_skill])
+```bash
+git log --oneline -5        # 直近のコミット履歴
+git branch                  # 現在のブランチ（autoresearch/<tag>にいること）
+git status                  # 未コミットの変更がないことを確認
 ```
 
-**ラウンドロビン順:** product-comparison → service-selection → travel-planning → 繰り返し
+現在のベストgap_scoreは `results.tsv` の直近KEEPレコードから確認。
 
 ---
 
-## Step 2: スキル実行
+## Step 2: 仮説生成と SKILL.md 修正
 
-`SKILL.md` の **核心思考パターン A〜E** に従って出力を生成する。
+**トピック選択:**
+- `topics.json` から未使用のトピックを1つ選ぶ
+- ラウンドロビン: product-comparison → service-selection → travel-planning → 繰り返し
 
-### 必須チェックリスト（実行前）
+**仮説生成ルール:**
+- 前回のDISCARD/gapの原因から「どの思考パターンが機能していなかったか」を特定
+- **禁止**: トピック固有のルール追加（「スキー旅行ではレンタル確認」等）
+- **必須**: どのカテゴリにも適用できる汎用的な動き方として記述
+
+仮説の良い例:
+> 「カテゴリランキングを参照して未知候補を発見する（Pattern F）」
+> → コーヒーメーカーでも、SaaSでも、観光地でも同じ動きで機能する
+
+仮説の悪い例:
+> 「スキー旅行のレンタル料金確認ステップを追加する」
+> → トピック固有の暗記。新カテゴリに使えない
+
+**SKILL.md 修正:**
+```bash
+# バージョン番号を上げて修正
+# 例: version: 2.0.1 → 2.0.2
+```
+
+---
+
+## Step 3: git commit（実行前）
+
+autoresearch と同様に、**実行前にコミットする**。
+これにより、DISCARDのときに `git reset` で確実に元に戻せる。
+
+```bash
+git add skills/<skill>/SKILL.md
+git commit -m "Loop<N> [<skill>] hypothesis: <仮説の1行サマリー>"
+```
+
+例:
+```bash
+git commit -m "Loop11 [product-comparison] hypothesis: add ranking-based discovery (Pattern F)"
+```
+
+---
+
+## Step 4: スキルを実行
+
+`skills/<skill>/SKILL.md` の **核心思考パターン A〜F** に従って出力を生成する。
+
+### 実行前チェックリスト
 - [ ] パターンA: 制約→失敗モード変換 を実行したか
-- [ ] パターンB: 全候補の公式ページを並列フェッチしたか（比較記事価格を使っていないか）
-- [ ] パターンC: 総コストを変える変数を洗い出したか（シナリオ分岐を作ったか）
+- [ ] パターンB: 全候補の公式ページを並列フェッチしたか
+- [ ] パターンC: 総コストを変える変数を洗い出したか
 - [ ] パターンD: 予算超過を数値で証明し代替を提示したか
 - [ ] パターンE: 次の1〜2点の具体的な次アクションを提案したか
+- [ ] パターンF: カテゴリランキングで未知候補を発見したか
 
 ---
 
-## Step 3: GenSpark 実行
+## Step 5: GenSpark を実行
 
-Chrome MCP を使って GenSpark に同じクエリを送信する。
+Chrome MCP で同じクエリを GenSpark に送信する。
 
-```
-1. tabs_context_mcp で tabId を取得
-2. navigate して https://www.genspark.ai に移動
-3. javascript_tool で textarea にクエリを入力して Enter を送信
-4. 60〜120秒待機
-5. get_page_text でアウトプットを取得
-6. まだ処理中なら さらに60秒待機して再取得
-```
-
-### GenSpark Enter送信のコード（実績あり）
 ```javascript
+// javascript_tool で実行
 const textarea = document.querySelector('textarea');
 textarea.focus();
 textarea.value = 'クエリ文字列';
@@ -94,11 +153,11 @@ textarea.dispatchEvent(new KeyboardEvent('keydown', {
 }));
 ```
 
+待機: 最低60秒、完了まで60秒ずつ延長。
+
 ---
 
-## Step 4: 採点
-
-`evaluate_rubric.md` の5次元で **スキル出力** と **GenSpark出力** を採点する。
+## Step 6: 採点（evaluate_rubric.md 準拠）
 
 ```
 skill_score     = 次元1 + 次元2 + 次元3 + 次元4 + 次元5  (max 100)
@@ -106,123 +165,90 @@ genspark_score  = 次元1 + 次元2 + 次元3 + 次元4 + 次元5  (max 100)
 gap_score       = genspark_score - skill_score
 ```
 
-**重要:** 採点は両システムを独立に採点した後に差を計算する。
-GenSparkの点を先に見てからスキルを採点するバイアスを避ける。
+採点はスキル出力とGenSpark出力を**独立に**採点してから差を計算する。
 
 ---
 
-## Step 5: 差分分析と仮説生成
+## Step 7: KEEP / DISCARD 判定
 
-採点後、**GenSparkが上回った次元** を特定して仮説を立てる。
+```python
+if gap_score_now < gap_score_prev:
+    status = "keep"
+    # コミットをそのまま維持
+else:
+    status = "discard"
+    git reset --hard HEAD~1   # 直前のコミットを取り消す
+    # SKILL.md が前の状態に戻る
+```
 
-### 仮説生成のルール
-**禁止:** トピック固有のルールを追加する（「スキー旅行ではレンタル確認」等）
-**必須:** 思考パターンの動き方として一般化する
-
-仮説の良い例:
-> 「次元1（情報精度）が低い原因: 検索スニペットの価格を使った。
-> 仮説: パターンBの並列フェッチを Step 2 ではなく Step 4 で実行するよう順序を変える」
-
-仮説の悪い例:
-> 「スキー旅行のレンタル料金を確認するステップを追加する」
-> → これはトピック固有の暗記。新しいカテゴリに使えない。
+**簡潔さボーナス:**
+- gap_scoreが同じでもSKILL.mdが短くなった（不要なルールを削除した）場合は "keep"
+- 微小な改善でも複雑な記述が増えた場合はDISCARDを検討
 
 ---
 
-## Step 6: SKILL.md の更新
-
-仮説に基づいて `skills/[スキル名]/SKILL.md` を更新する。
-
-### 更新ルール
-1. 既存パターン（A〜E）の**動き方を精緻化**する（追加より改善）
-2. 新パターンを追加する場合は、**最低2つの異なるカテゴリに適用できる汎用性**があること
-3. 変更は最小限に。1ループ1仮説が原則
-4. 変更前のバージョンを `versions/` に保存してから更新
+## Step 8: results.tsv に記録（git commit しない）
 
 ```bash
-cp skills/[skill]/SKILL.md skills/[skill]/versions/v[new_version].md
-# SKILL.md を編集
+# コミットハッシュを取得
+COMMIT=$(git rev-parse --short HEAD)
+
+# results.tsv に追記（git管理しない）
+echo "${COMMIT}\t${GAP}\t${SKILL}\t${GENSPARK}\t${STATUS}\t${SKILL_NAME}\t${TOPIC}\t${DESC}" >> results.tsv
+```
+
+フォーマット:
+```
+commit	gap_score	skill_score	genspark_score	status	skill	topic	description
+```
+
+例:
+```
+3bb7c9e	26	68	94	discard	product-comparison	コーヒーメーカー	hypothesis: pattern F ranking check
+faab82d	19	73	92	keep	product-comparison	ワイヤレスイヤホン	pattern F confirmed: toffy/anker discovered
 ```
 
 ---
 
-## Step 7: git commit / discard の判定
+## KEEP/DISCARD の具体例
 
 ```
-if gap_score_now < gap_score_prev:
-    status = "KEEP"
-    git add skills/[skill]/SKILL.md
-    git commit -m "[ループ番号] [スキル名] [トピック]: gap -[改善幅]pt [変更サマリー]"
-else:
-    status = "DISCARD"
-    git checkout -- skills/[skill]/SKILL.md  # 変更を破棄
-    # results.tsv には記録する（失敗も学習）
+# KEEP の場合（gap改善）
+→ コミットはそのまま残る
+→ results.tsv: status=keep
+
+# DISCARD の場合（gap悪化）
+→ git reset --hard HEAD~1  で直前のコミットを削除
+→ SKILL.md が前の状態に戻る
+→ results.tsv: status=discard（失敗も記録する — 学習のため）
+→ program.md の「過去のDISCARD仮説ログ」に追記
 ```
 
 ---
 
-## Step 8: results.tsv への記録
+## NEVER STOP
 
-```tsv
-[loop_id]\t[date]\t[skill]\t[topic]\t[skill_score]\t[genspark_score]\t[gap_score]\t[status]\t[key_change]\t[commit_hash]
-```
+ユーザーに指定された時間か手動停止まで、**確認なしに継続する**。
 
-- `key_change`: KEEP なら変更内容の1行サマリー、DISCARD なら「仮説X は効果なし」
-- `commit_hash`: `git rev-parse --short HEAD` で取得
-
----
-
-## 収束条件・停止基準
-
-ユーザーに指定された時間になったら停止。それ以外は自律継続。
-
-### 早期停止すべき例外状況
-- GenSpark が3連続でエラー/タイムアウト → ユーザーに報告して停止
-- gap_score が3ループ連続で変化なし（DISCARD続き）→ 仮説生成の視点を変えて継続
-- SKILL.md が著しく複雑になってきた（パターン数が8を超えた）→ 整理して統合
-
----
-
-## 進捗レポート（ループN件ごとに出力）
-
-3ループごとに以下を標準出力に表示する:
-
+3ループごとに進捗レポートを出力:
 ```
 === 進捗レポート ===
 実施済みループ: N件
-gap_score 推移: [前回] → [今回]（差分: ±X）
+best gap_score: X (Loop M, <スキル>)
 KEEP/DISCARD: K件 / D件
-最も改善した変更: [key_change]
-現在のgap_score: [値]
-次のループ予定: [スキル] × [トピック]
-================
+現在のブランチ: autoresearch/mar30
+最新コミット: <hash> <message>
+次: <スキル> × <トピック>
+=================
 ```
 
----
-
-## 思考パターン（参照用）
-
-SKILL.mdに記述されている核心思考パターンの一覧。
-ループ中にこれらが機能しているかを常に確認する。
-
-### パターンA: 制約→失敗モード変換
-ユーザーの制約条件を「このカテゴリでハマる典型的な失敗モード」に変換してから比較軸を設計する。
-
-### パターンB: 価格は一次情報から並列取得
-候補が決まったら全員の公式ページを並列フェッチ。比較記事の価格は使わない。
-
-### パターンC: コストを変える変数を先に洗い出す
-総コストを変える隠れた条件を特定してシナリオ分岐を作る。
-
-### パターンD: 予算超過を数値で証明して代替を提示
-感想ではなく計算結果で証明する。同軸で比較できる代替を出す。
-
-### パターンE: 次の判断に必要な情報だけを次アクションとして提案
-情報の羅列ではなく、次の意思決定ギャップを埋める1〜2点。
+### 早期停止すべき例外
+- GenSpark が3連続タイムアウト → 報告して停止
+- git reset がエラー → 報告して停止（それ以外は継続）
 
 ---
 
-## 過去のDISCARD仮説ログ（ここに追記していく）
+## 過去のDISCARD仮説ログ
 
 形式: `[日付] [スキル] [仮説] → なぜ効果がなかったか`
-(例) `2026-03-30 product-comparison 「製品数を8に増やす」→ 情報過多になりgap_score悪化`
+（ここに追記していく）
